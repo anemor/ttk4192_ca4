@@ -52,6 +52,8 @@ class GraphPlan(object):
         # initialization
         initState = self.initialState
 
+        # Graphplan algorithm here
+
     def extract(self, Graph, subGoals, level):
 
         if level == 0:

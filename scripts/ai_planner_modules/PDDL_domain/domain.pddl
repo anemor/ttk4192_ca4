@@ -18,8 +18,8 @@
     )
 
     (:action move
-        :parameters (?from - waypoint ?to - waypoint ?r - robot)
-        :precondition ( and (at ?r ?from) (path ?from ?to) )
+        :parameters (?from - waypoint ?to - waypoint ?r - robot ?b - battery)
+        :precondition ( and (at ?r ?from) (path ?from ?to) (full-bat ?b))
         :effect ( and (at ?r ?to) (not (at ?r ?from)) )
     )
 
