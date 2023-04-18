@@ -31,6 +31,12 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import shutil
 import copy
+from ai_planner_modules.GraphPlan.propositionLayer import PropositionLayer
+from ai_planner_modules.GraphPlan.planGraphLevel import PlanGraphLevel
+from ai_planner_modules.GraphPlan.Parser import Parser
+from ai_planner_modules.GraphPlan.action import Action
+from ai_planner_modules.GraphPlan.search import aStarSearch
+from ai_planner_modules.GraphPlan.GraphPlan_main import isDifferent, lmap, lfilter
 
 """ ----------------------------------------------------------------------------------
 Mission planner for Autonomos robots: TTK4192, NTNU
@@ -45,29 +51,202 @@ Version: 1.1
 """
 Graph plan ---------------------------------------------------------------------------
 """
-class GraphPlan(object):
+
+class PlanningProblem():
+
     def __init__(self, domain, problem):
-        self.independentActions = []
-        self.noGoods = []
-        self.graph = []
+        """
+        Constructor
+        """
+        p = Parser(domain, problem)
+        self.actions, self.propositions = p.parseActionsAndPropositions()
+        # list of all the actions and list of all the propositions
+        self.initialState, self.goal = p.pasreProblem()
+        # the initial state and the goal state are lists of propositions
+        # creates noOps that are used to propagate existing propositions from
+        # one layer to the next
+        self.createNoOps()
+        PlanGraphLevel.setActions(self.actions)
+        PlanGraphLevel.setProps(self.propositions)
+        self._expanded = 0
 
-    def graphPlan(self):
-        # initialization
-        initState = self.initialState
+    def getStartState(self):
+        return self.initialState
 
-        # Graphplan algorithm here
+    def isGoalState(self, state):
+        """
+        Hint: you might want to take a look at goalStateNotInPropLayer function
+        """
+        return not self.goalStateNotInPropLayer(state)
 
-    def extract(self, Graph, subGoals, level):
+    def getSuccessors(self, state):
+        """
+        For a given state, this should return a list of triples,
+        (successor, action, stepCost), where 'successor' is a
+        successor to the current state, 'action' is the action
+        required to get there, and 'stepCost' is the incremental
+        cost of expanding to that successor, 1 in our case.
+        You might want to this function:
+        For a list of propositions l and action a,
+        a.allPrecondsInList(l) returns true if the preconditions of a are in l
+        """
 
-        if level == 0:
-            return []
-        if subGoals in self.noGoods[level]:
-            return None
-        plan = self.gpSearch(Graph, subGoals, [], level)
-        if plan is not None:
-            return plan
-        self.noGoods[level].append([subGoals])
-        return None
+        def allPrecondsInList(action, propositions):
+            for pre in action.getPre():
+                if pre not in propositions:
+                    return False
+            return True
+
+        successors = []
+        step_cost = 1
+
+        self._expanded += 1
+
+        # get all possible actions
+        for action in self.actions:
+            if (not action.isNoOp()) and allPrecondsInList(action, state):
+                # add all the positives
+                successor = state + \
+                    [p for p in action.getAdd() if p not in state]
+                # remove all the negatives
+                successor = [
+                    p for p in successor if p not in action.getDelete()]
+
+                successors.append((successor, action, step_cost))
+        return successors
+
+
+    def getCostOfActions(self, actions):
+        return len(actions)
+
+    def goalStateNotInPropLayer(self, propositions):
+        """
+        Helper function that returns true if all the goal propositions
+        are in propositions
+        """
+        for goal in self.goal:
+            if goal not in propositions:
+                return True
+        return False
+
+    def createNoOps(self):
+        """
+        Creates the noOps that are used to propagate propositions from one layer to the next
+        """
+        for prop in self.propositions:
+            name = prop.name
+            precon = []
+            add = []
+            precon.append(prop)
+            add.append(prop)
+            delete = []
+            act = Action(name, precon, add, delete, True)
+            self.actions.append(act)
+
+
+def maxLevel(state, problem):
+    """
+    The heuristic value is the number of layers required to expand all goal propositions.
+    If the goal is not reachable from the state your heuristic should return float('inf')
+    A good place to start would be:
+    propLayerInit = PropositionLayer()          #create a new proposition layer
+    for prop in state:
+      #update the proposition layer with the propositions of the state
+      propLayerInit.addProposition(prop)
+    # create a new plan graph level (level is the action layer and the
+    # propositions layer)
+    pgInit = PlanGraphLevel()
+    #update the new plan graph level with the the proposition layer
+    pgInit.setPropositionLayer(propLayerInit)
+    """
+    def nextPlan(plan):
+        next_plan = PlanGraphLevel()
+        next_plan.expandWithoutMutex(plan)
+        return next_plan, next_plan.getPropositionLayer().getPropositions()
+
+    propLayerInit = PropositionLayer()
+    # add all to the new proposition layer
+    lmap(propLayerInit.addProposition, state)
+
+    plan = PlanGraphLevel()
+    plan.setPropositionLayer(propLayerInit)
+    plan_propositions = plan.getPropositionLayer().getPropositions()
+
+    # create a graph that will store all the plan levels
+    graph = []
+    graph.append(plan)
+
+    # if we found we can rest
+    while not problem.isGoalState(plan_propositions):
+        # if fixed we won't have a solution
+        if isFixed(graph, len(graph) - 1):
+            return float('inf')
+        # create the next plan by the prev
+        plan, plan_propositions = nextPlan(plan)
+        # store in the graph
+        graph.append(plan)
+
+    return len(graph) - 1
+
+
+def levelSum(state, problem):
+    """
+    The heuristic value is the sum of sub-goals level they first appeared.
+    If the goal is not reachable from the state your heuristic should return float('inf')
+    """
+    def nextPlan(plan):
+        next_plan = PlanGraphLevel()
+        next_plan.expandWithoutMutex(plan)
+        return next_plan, next_plan.getPropositionLayer().getPropositions()
+
+    propLayerInit = PropositionLayer()
+    # add all to the new proposition layer
+    lmap(propLayerInit.addProposition, state)
+
+    plan = PlanGraphLevel()
+    plan.setPropositionLayer(propLayerInit)
+    plan_propositions = plan.getPropositionLayer().getPropositions()
+
+    # create a graph that will store all the plan levels
+    graph = []
+    graph.append(plan)
+
+    goals_levels = dict()
+    goal = problem.goal
+
+    # init goals levels
+    for p in goal:
+        goals_levels[p.getName()] = None
+
+    # as long as we have for one of the goal None we didnt find the first level
+    while None in goals_levels.values():
+        # if fixed we won't have a solution
+        if isFixed(graph, len(graph) - 1):
+            return float('inf')
+        # for each prop in the goal check if exist on the current plan
+        # propositions
+        for p in goal:
+            # check that we didnt assign a value yet
+            if p in plan_propositions and goals_levels[p.getName()] == None:
+                # set the current level as the fist appearance of the prop
+                goals_levels[p.getName()] = len(graph) - 1
+        # create the next plan by the prev
+        plan, plan_propositions = nextPlan(plan)
+        # store in the graph
+        graph.append(plan)
+
+    return sum(goals_levels.values())
+
+
+def isFixed(Graph, level):
+    """
+    Checks if we have reached a fixed point,
+    i.e. each level we'll expand would be the same, thus no point in continuing
+    """
+    if level == 0:
+        return False
+    return len(Graph[level].getPropositionLayer().getPropositions()) == len(Graph[level - 1].getPropositionLayer().getPropositions())
+
 
 
 #2) GNC module (path-followig and PID controller for the robot)
@@ -649,35 +828,54 @@ def taking_photo():
     # Sleep to give the last log messages time to be sent
 
 	# saving photo in a desired directory
-    file_source = '/home/miguel/catkin_ws/'
-    file_destination = '/home/miguel/catkin_ws/src/assigment4_ttk4192/scripts'
+    file_source = '/home/catkin_ws/'
+    file_destination = '/home/catkin_ws/src/ca4_ttk4192/scripts'
     g='photo'+dt_string+'.jpg'
 
     shutil.move(file_source + g, file_destination)
     rospy.sleep(1)
 
 def move_robot_waypoint0_waypoint1():
-    # This function executes Move Robot from 1 to 2
-    # This function uses hybrid A-star
+    """ Moving robot from WP0 to WP1"""
     a=0
     while a<3:
-        print("Excuting Mr12")
+        print("Excuting Mr01")
         time.sleep(1)
         a=a+1
     print("Computing hybrid A* path")
-	
-    p = argparse.ArgumentParser()
-    p.add_argument('-heu', type=int, default=1, help='heuristic type')
-    p.add_argument('-r', action='store_true', help='allow reverse or not')
-    p.add_argument('-e', action='store_true', help='add extra cost or not')
-    p.add_argument('-g', action='store_true', help='show grid or not')
-    args = p.parse_args()
-    start_pos = [2, 2, 0]
-    end_pos = [6, 6, 3*pi/4]
-    main_hybrid_a(args.heu,start_pos,end_pos,args.r,args.e,args.g)
+
+    start_pos = [0.5, 1.0 + safety_distance, -np.pi/2]
+    end_pos = [14.8, 4.3 - safety_distance, np.pi/2]
+
+    run_HybridAStar(start_pos, end_pos)
     print("Executing path following")
     turtlebot_move()
 
+def move_robot(WPx, WPy):
+    """ Moving robot from WPx to WPy"""
+    a=0
+    while a<3:
+        print("Moving robot from WP{} to WP{}".format(WPx, WPy))
+        time.sleep(1)
+        a=a+1
+    print("Computing hybrid A* path")
+
+    # Waypoints defined with origin in bottom left corner for hybrid A*
+    safety_distance = 0.76
+    WP= [[0.5, 1.0 + safety_distance, -np.pi/2],
+         [14.8, 4.3 - safety_distance, np.pi/2],
+         [24.1, 7.1 + safety_distance, -np.pi/2],
+         [26.2, 21.5 - safety_distance, np.pi/2],
+         [39.5, 3.0 + safety_distance, -np.pi/2],
+         [7.0 , 19.5, 0],
+         [29.4, 14.3 - safety_distance, np.pi/2]]
+    
+    start_pos = WP[int(WPx)]
+    end_pos = WP[int(WPy)]
+
+    run_HybridAStar(start_pos, end_pos)
+    print("Executing path following")
+    turtlebot_move()
 
 def Manipulate_OpenManipulator_x():
     print("Executing manipulate a weight")
@@ -731,31 +929,55 @@ def making_turn_exe():
     velocity_publisher.publish(vel_msg)
     #rospy.spin()
 
-def check_pump_picture_ir_waypoint0():
+def check_pump_picture_ir_waypoint5():
     a=0
     while a<3:
-        print("Taking IR picture at waypoint0 ...")
+        print("Taking IR picture at waypoint5 ...")
         time.sleep(1)
         a=a+1
     time.sleep(5)
 
-def check_seals_valve_picture_eo_waypoint0():
+def check_pump_picture_ir(WPx):
     a=0
     while a<3:
-        print("Taking EO picture at waypoint0 ...")
+        print("Taking IR picture at WP{} ...".format(WPx))
+        time.sleep(1)
+        a=a+1
+    time.sleep(5)
+
+def check_seals_valve_picture_eo_waypoint1():
+    a=0
+    while a<3:
+        print("Taking EO picture at waypoint1 ...")
+        time.sleep(1)
+        a=a+1
+    time.sleep(5)
+
+def check_seals_valve_picture_eo(WPx):
+    a=0
+    while a<3:
+        print("Taking EO picture at WP{} ...".format(WPx))
         time.sleep(1)
         a=a+1
     time.sleep(5)
 
 # Charging battery 
-def charge_battery_waypoint0():
-    print("chargin battert")
+def charge_battery(WPx):
+    print("Charging battery at WP{}".format(WPx))
     time.sleep(5)
 
 
 # Define the global varible: WAYPOINTS  Wpts=[[x_i,y_i]];
 global WAYPOINTS
-WAYPOINTS = [[1,1],[2,2]]
+safety_distance = 0.76
+#### Note! These waypoints defined when origin is in bottom left corner
+WAYPOINTS = [[0.5, 1.0 + safety_distance],
+             [14.8, 4.3 - safety_distance],
+             [24.1, 7.1 + safety_distance],
+             [26.2, 21.5 - safety_distance],
+             [39.5, 3.0 + safety_distance],
+             [7.0 , 19.5],
+             [29.4, 14.3 - safety_distance]]
 
 
 # 5) Program here the main commands of your mission planner code
@@ -764,7 +986,7 @@ WAYPOINTS = [[1,1],[2,2]]
 if __name__ == '__main__':
     try:
         print()
-        print("************ TTK4192 - Assignment 4 **************************")
+        print("**************** TTK4192 - Assignment 4 *********************")
         print()
         print("AI planners: GraphPlan")
         print("Path-finding: Hybrid A*")
@@ -777,63 +999,76 @@ if __name__ == '__main__':
         print("Press Intro to start ...")
         input_t=input("")
         # 5.0) Testing the GNC module (uncomment lines to test)
-        print("testing GNC module, move between way-points")
-        WAYPOINTS = [[1,1],[2,2]]
-        turtlebot_move()
-       
+        #print("testing GNC module, move between way-points")
+        #WAYPOINTS = [[-19.5,-9.25],[-5.2, -6.95 - 0.76]]
+        #turtlebot_move()
 
 		# 5.1) Starting the AI Planner
        
         a_plan=1    
         if a_plan==1:
-           print(" ---Executing Graph planner --- ")
-           time.sleep(1)
-           if len(sys.argv) != 1 and len(sys.argv) != 3:
+            print(" ---Executing Graph planner --- ")
+            time.sleep(1)
+            if len(sys.argv) != 1 and len(sys.argv) != 3:
                 print("Usage: GraphPlan.py domainName problemName")
                 exit()
-            # Here you need to load your PDDL domain
-           dir_p="/home/miguel/catkin_ws/src/assignment4_ttk4192/scripts/ai_planner_modules/PDDL_domain/"
-           domain = dir_p+"dwrDomain_turtlebot.txt"
-           problem = dir_p+"dwrProblem_turtlebot.txt"
-           if len(sys.argv) == 3:
+           
+            domain = '/home/marie/catkin_ws/src/ca4_ttk4192/scripts/ai_planner_modules/GraphPlan/domain_turtlebot.txt'   # Here you can change the Domain file
+            problem = '/home/marie/catkin_ws/src/ca4_ttk4192/scripts/ai_planner_modules/GraphPlan/problem_turtlebot.txt' # Here you can change the Problem file
+            heuristic = lambda x, y: 0
+            if len(sys.argv) == 4:
                 domain = str(sys.argv[1])
                 problem = str(sys.argv[2])
-           gp = GraphPlan(domain, problem)
-           start = time.time()
-           plan = gp.graphPlan()
-           elapsed = time.time() - start
-           plan=np.array(plan)
-           l=[]
+                if str(sys.argv[3]) == 'max':
+                    heuristic = maxLevel
+                elif str(sys.argv[3]) == 'sum':
+                    heuristic = levelSum
+                elif str(sys.argv[3]) == 'zero':
+                    heuristic = lambda x, y: 0
+                else:
+                    print(
+                        "Usage: PlanningProblem.py domainName problemName heuristicName(max, sum or zero)")
+                    exit()
+
+            prob = PlanningProblem(domain, problem)
+            start = time.process_time()*1000 # milisecs
+            plan = aStarSearch(prob, heuristic)
+            elapsed = time.process_time()*1000 - start
+            l=[]
             #print([plan.action for action in plan])
-           if plan is not None:
-                print("Plan found with %d actions in %.2f seconds" %
-                    (len([act for act in plan if not act.isNoOp()]), elapsed))            
+            if plan is not None:
+                print("Plan found with %d actions in %.2f mSec" %
+                    (len([act for act in plan if not act.isNoOp()]), elapsed))
+                plan=np.array(plan)
                 for i in range(len(plan)):
                     #print(plan[i])
                     l.append(plan[i])
-           else:
+            else:
                 print("Could not find a plan in %.2f seconds" % elapsed)
 
             #print(l[1])
-           m=[]
-           for i in range(len(l)):
+            m=[]
+            for i in range(len(l)):
                 a=str(l[i])
                 for k in a:
                     if a[0].isupper():
                         m.append(a)
                         break
-           plan_general=m
-           #print("Plan in graph -plan",plan_general)
-           # expansion of names of actions graph notation
-           for i in range(len(plan_general)):
-               if plan_general[i]=="Pr2":
+            plan_general=m
+            print(plan_general)
+            print("Search nodes expanded: %d" % prob._expanded)
+           
+            #print("Plan in graph -plan",plan_general)
+            # expansion of names of actions graph notation
+            for i in range(len(plan_general)):
+                if plan_general[i]=="Pr2":
                    plan_general[i]="taking_photo"
-               if plan_general[i]=="Tr3":
+                if plan_general[i]=="Tr3":
                    plan_general[i]="making_turn"
-           print("Plan: ",plan_general)
+            print("Plan: ",plan_general)
         else:
-           time.sleep()
-           print("No valid option")
+            time.sleep()
+            print("No valid option")
    
     
         # 5.2) Reading the plan 
@@ -853,13 +1088,15 @@ if __name__ == '__main__':
         task_total=len(plan_general)
         i_ini=0
         while i_ini < task_total:
-            move_robot_waypoint0_waypoint1()
+            #move_robot_waypoint0_waypoint1()       # Commented this
             #taking_photo_exe()
 
-            plan_temp=plan_general[i_ini].split()
-            print(plan_temp)
-            if plan_temp[0]=="check_pump_picture_ir":
-                print("Inspect -pump")
+            plan_temp = plan_general[i_ini].split()
+            print('Plan temp: ', plan_temp)     # plan_temp[0] = Ms12, plan_temp[0][0] = M
+            #### These under: TODO
+            if plan_temp[0]=="P":       # Take picture
+                print("Taking picture of pump")
+                # Perform action here
                 time.sleep(1)
 
             if plan_temp[0]=="check_seals_valve_picture_eo":
@@ -867,8 +1104,9 @@ if __name__ == '__main__':
 
                 time.sleep(1)
 
-            if plan_temp[0]=="move_robot":
-                print("move_robot_waypoints")
+            if plan_temp[0][0]=="M":
+                #print("Moving robot between waypoints")
+                move_robot(plan_temp[0][2], plan_temp[0][3])
 
                 time.sleep(1)
 

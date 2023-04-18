@@ -397,8 +397,8 @@ if __name__ == '__main__':
     WP5 = [7.0 , 19.5, 0]
     WP6 = [29.4, 14.3 - safety_distance, np.pi/2]
 
-    start   = WP2
-    goal    = WP3
+    start   = WP1
+    goal    = WP2
 
     print('----- Executing hybrid A* -----')
     run_HybridAStar(start, goal)
