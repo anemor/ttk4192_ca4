@@ -89,7 +89,6 @@ class Astar:
         open_ = [root]
 
         while open_:
-
             best = min(open_, key=lambda x: x.f)
 
             open_.remove(best)
