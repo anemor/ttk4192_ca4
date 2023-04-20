@@ -649,17 +649,16 @@ def taking_photo():
     rospy.sleep(1)
 
 def move_robot(WPx, WPy):
-    """ Moving robot from WPx to WPy"""
-    a=0
-    while a<3:
-        print("Moving robot from WP{} to WP{}".format(WPx, WPy))
-        time.sleep(1)
-        a=a+1
+    # QUESTION: Is it correct to run hybrid A*?
+    # How can turtlebot_move() find the correcponding waypoints?
+    # Are the waypoints indexed in bottom left corner or origin?
+
+    print("Moving robot from WP{} to WP{}".format(WPx, WPy))
     print("Computing hybrid A* path")
 
     # Waypoints defined with origin in bottom left corner for hybrid A*
     safety_distance = 0.76
-    WP= [[0.5, 1.0 + safety_distance, -np.pi/2],
+    WP = [[0.5, 1.0 + safety_distance, -np.pi/2],
          [14.8, 4.3 - safety_distance, np.pi/2],
          [24.1, 7.1 + safety_distance, -np.pi/2],
          [26.2, 21.5 - safety_distance, np.pi/2],
@@ -674,7 +673,28 @@ def move_robot(WPx, WPy):
     print("Executing path following")
     turtlebot_move()
 
+def take_picture(WPx):
+    # QUESTION: Is this the correct way of doing this?
+
+    print("Taking IR picture at WP{} ...".format(WPx))
+    taking_photo()
+    time.sleep(5)
+
+def inspect_valve(WPx):
+    # QUESTION: Correct? Robot not supposed to do anything?
+
+    print("Inspecting valve at WP{} ...".format(WPx))
+    time.sleep(5)
+
+def charge_battery(WPx):
+    # QUESTION: Correct?
+
+    print("Charging battery at WP{}".format(WPx))
+    time.sleep(5)
+
 def Manipulate_OpenManipulator_x():
+    # QUESTION: Is this for bonus task? How to start?
+
     print("Executing manipulate a weight")
     time.sleep(5)
 
@@ -726,6 +746,8 @@ def making_turn_exe():
     velocity_publisher.publish(vel_msg)
     #rospy.spin()
 
+# QUESTION: These not used?
+"""
 def check_pump_picture_ir(WPx):
     a=0
     while a<3:
@@ -741,23 +763,20 @@ def check_seals_valve_picture_eo(WPx):
         time.sleep(1)
         a=a+1
     time.sleep(5)
-
-def charge_battery(WPx):
-    print("Charging battery at WP{}".format(WPx))
-    time.sleep(5)
+"""
 
 
 # Define the global varible: WAYPOINTS  Wpts=[[x_i,y_i]];
 global WAYPOINTS
 safety_distance = 0.76
-#### Note! These waypoints defined when origin is in bottom left corner
-WAYPOINTS = [[0.5, 1.0 + safety_distance],
-             [14.8, 4.3 - safety_distance],
-             [24.1, 7.1 + safety_distance],
-             [26.2, 21.5 - safety_distance],
-             [39.5, 3.0 + safety_distance],
-             [7.0 , 19.5],
-             [29.4, 14.3 - safety_distance]]
+# QUESTION: Are these correct? Correct way of defining them?
+WAYPOINTS = [[-19.5,-10.25 + safety_distance ],   #[0.5, 1.0 + safety_distance],
+             [-5.20, -6.95 - safety_distance ],   #[14.8, 4.3 - safety_distance],
+             [ 4.10, -4.15 + safety_distance ],   #[24.1, 7.1 + safety_distance],
+             [ 6.20, 10.25 - safety_distance ],   #[26.2, 21.5 - safety_distance],
+             [ 19.5, -8.25 + safety_distance ],   #[39.5, 3.0 + safety_distance],
+             [-13.0, 8.25 ],                      #[7.0 , 19.5],
+             [ 9.40, 3.05 - safety_distance ]]    #[29.4, 14.3 - safety_distance]]
 
 
 # 5) Program here the main commands of your mission planner code
@@ -777,7 +796,7 @@ if __name__ == '__main__':
         print("**************************************************************")
         print()
         print("Press Intro to start ...")
-        input_t=input("")
+        input_t = input("")
         # 5.0) Testing the GNC module (uncomment lines to test)
         #print("testing GNC module, move between way-points")
         #WAYPOINTS = [[-19.5,-9.25],[-5.2, -6.95 - 0.76]]
@@ -826,24 +845,26 @@ if __name__ == '__main__':
         while i_ini < task_total:
 
             plan_temp = plan_general[i_ini]
-            print('Plan temp: ', plan_temp.action, plan_temp.objects)
+            print('   ')
+            print('Step {}: {}, {}'.format(i_ini+1, plan_temp.action, plan_temp.objects))
 
-            if plan_temp.action == "move":      # Done, just check
+            if plan_temp.action == "move":
                 WPx, WPy = plan_temp.get_waypoints()
                 move_robot(WPx, WPy)
                 time.sleep(1)
 
-            if plan_temp.action == "take-picture":  # Should we do something more than taking photo? Checking something?
+            if plan_temp.action == "take-picture":
                 print("Taking picture at WP{}".format(plan_temp.get_waypoints()))
-                taking_photo()
+                #taking_photo() <- incorporated into function above
                 time.sleep(1)
 
-            if plan_temp.action == "inspect-valve":     # Done?
+            if plan_temp.action == "inspect-valve":
                 WP = plan_temp.get_waypoints()
-                check_seals_valve_picture_eo(WP)
+                inspect_valve(WP)
+                #check_seals_valve_picture_eo(WP)
                 time.sleep(1)
 
-            if plan_temp.action == "charge-robot":      # Done?
+            if plan_temp.action == "charge-robot":
                 WP = plan_temp.get_waypoints()
                 charge_battery(WP)
                 time.sleep(1)
