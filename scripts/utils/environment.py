@@ -81,7 +81,7 @@ class Environment_robplan:
     """ The map configuration. """
 
     #def __init__(self, obs=None, lx=10, ly=10):  % Aqui es creo, pero atento bro!
-    def __init__(self, obs=None, lx=40, ly=22.41):
+    def __init__(self, obs=None, lx=40, ly=22.5):
 
 
         self.lx  = float(lx)

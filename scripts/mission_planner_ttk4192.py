@@ -113,10 +113,28 @@ class turtlebot_move():
     """
     Path-following module
     """
-    def __init__(self):
+    def __init__(self, path):
         rospy.init_node('turtlebot_move', anonymous=False)
         rospy.loginfo("Press CTRL + C to terminate")
         rospy.on_shutdown(self.stop)
+        self.path = path
+
+        ### Code to just extract points in path that are not straight forward
+        prev = [0, 0, 0]
+        self.track = []
+        for p in self.path:
+            if abs(p[2] - prev[2]) > 0.01:
+                if abs(p[0] - prev[0]) > 0.1 or abs(p[1] - prev[1]) > 0.1:
+                    self.track.append(p)
+                    prev = p
+
+        print('Path:', len(self.path), '- Track:', len(self.track))
+
+
+        ### Changing origin
+        for i in range(len(self.track)):    # in self.path
+            point = self.track[i]
+            self.track[i] = [point[0] -20, point[1] -11.25, point[2]]
 
         self.x = 0.0
         self.y = 0.0
@@ -131,9 +149,10 @@ class turtlebot_move():
         self.trajectory = list()
 
         # track a sequence of waypoints
-        for point in WAYPOINTS:
+        for point in self.track:
+            print(point)
             self.move_to_point(point[0], point[1])
-            rospy.sleep(1)
+            #rospy.sleep(1)
         self.stop()
         rospy.logwarn("Action done.")
 
@@ -143,10 +162,11 @@ class turtlebot_move():
         plt.plot(data[:,0],data[:,1])
         plt.show()
 
-
     def move_to_point(self, x, y):
         # Here must be improved the path-following ---
         # Compute orientation for angular vel and direction vector for linear velocity
+
+        print('Moving from (', self.x, self.y, ') to (', x, y, ')')
 
         diff_x = x - self.x
         diff_y = y - self.y
@@ -197,6 +217,7 @@ class turtlebot_move():
             self.vel_pub.publish(self.vel)
             self.rate.sleep()
         self.stop()
+    
     def stop(self):
         self.vel.linear.x = 0
         self.vel.angular.z = 0
@@ -464,8 +485,9 @@ def run_HybridAStar(start, goal):
         print('No valid path')
         return
     
-    #for i in range(len(path)):
-    #    print(path[i].pos)
+    path_return = []
+    for i in range(len(path)):
+        path_return.append(path[i].pos)
 
     """Post-processing to obtain path list"""
     path = path[::5] + [path[-1]]
@@ -585,6 +607,8 @@ def run_HybridAStar(start, goal):
                                   interval=1, repeat=True, blit=True)
 
     plt.show()
+
+    return path_return
     
 
 #4) Program here the turtlebot actions (based on your AI planner)
@@ -669,9 +693,9 @@ def move_robot(WPx, WPy):
     start_pos = WP[int(WPx)]
     end_pos = WP[int(WPy)]
 
-    run_HybridAStar(start_pos, end_pos)
+    path = run_HybridAStar(start_pos, end_pos)
     print("Executing path following")
-    turtlebot_move()
+    turtlebot_move(path)
 
 def take_picture(WPx):
     # QUESTION: Is this the correct way of doing this?
@@ -745,25 +769,6 @@ def making_turn_exe():
     vel_msg.angular.z = 0
     velocity_publisher.publish(vel_msg)
     #rospy.spin()
-
-# QUESTION: These not used?
-"""
-def check_pump_picture_ir(WPx):
-    a=0
-    while a<3:
-        print("Taking IR picture at WP{} ...".format(WPx))
-        time.sleep(1)
-        a=a+1
-    time.sleep(5)
-
-def check_seals_valve_picture_eo(WPx):
-    a=0
-    while a<3:
-        print("Taking EO picture at WP{} ...".format(WPx))
-        time.sleep(1)
-        a=a+1
-    time.sleep(5)
-"""
 
 
 # Define the global varible: WAYPOINTS  Wpts=[[x_i,y_i]];

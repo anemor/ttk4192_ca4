@@ -262,8 +262,9 @@ def run_HybridAStar(start, goal):
         print('No valid path')
         return
     
-    #for i in range(len(path)):
-    #    print(path[i].pos)
+    path_return = []
+    for i in range(len(path)):
+        path_return.append(path[i].pos)
 
     """Post-processing to obtain path list"""
     path = path[::5] + [path[-1]]
@@ -383,6 +384,8 @@ def run_HybridAStar(start, goal):
                                   interval=1, repeat=True, blit=True)
 
     plt.show()
+
+    return path_return
     
 
 if __name__ == '__main__':
@@ -397,8 +400,24 @@ if __name__ == '__main__':
     WP5 = [7.0 , 19.5, 0]
     WP6 = [29.4, 14.3 - safety_distance, np.pi/2]
 
-    start   = WP1
-    goal    = WP2
+    start   = WP4
+    goal    = WP1
 
     print('----- Executing hybrid A* -----')
-    run_HybridAStar(start, goal)
+    path = run_HybridAStar(start, goal)
+
+    ### Finding track with fewer points
+    prev = [0, 0, 0]
+    track = []
+    for p in path:
+        if abs(p[2] - prev[2]) > 0.1: #or abs(p[0] - prev[0]) > 1 or abs(p[1] - prev[1]) > 1:
+            if abs(p[0] - prev[0]) > 0.1 or abs(p[1] - prev[1]) > 0.1:
+                track.append(p)
+                prev = p
+
+    ### Shifting waypoints
+    shift = []
+    for point in track:
+        shift.append([point[0] - 20, point[1] - 11.25, point[2]])
+
+    print('Length: ', len(path), len(track))
